@@ -28,7 +28,7 @@ if __name__ == '__main__':
 	model = Unet().to(device)
 	# model.load_state_dict(torch.load('./model_1.pth'))
 	loss_fn = nn.MSELoss()
-	dataset = siim_dataset('./dataset/train/data', './dataset/train/label')
+	dataset = siim_dataset('dicom-images-train', 'train-rle.csv')
 	dataset = DataLoader(dataset, batch_size=args.batch_size, shuffle = True)
 	optimizer = optim.Adam(model.parameters(), lr = args.lr)
 	print(f"""
