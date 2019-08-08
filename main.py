@@ -31,6 +31,7 @@ def dice_coef(y_true, y_pred):
 
 	intersection = torch.sum(y_true_f * y_pred_f)
 	return (2. * intersection + smooth) / (torch.sum(y_true_f) + torch.sum(y_pred_f) + smooth)
+
 def dice_loss_fn(y_true, y_pred):
 	return 1-dice_coef(y_true, y_pred)
 
@@ -52,24 +53,26 @@ def IOU(pred, label):
 	return total_score / (valid_count+1)
 
 def go(x):
-    return x
+	return x
 
 if __name__ == '__main__':
 	
 	#model = U_resnet(Bottleneck, UnetBlock, [1,1,1,1]).to(device)
 	model = smp.Unet("resnet18", encoder_weights="imagenet", activation=go).to(device)
-
-	#model.load_state_dict(torch.load('./model_100.pth'))
-	# loss_fn = nn.BCELoss()
-	loss_fn = smp.utils.losses.BCEDiceLoss(eps=1.)
 	
 	dataset = siim_dataset('dicom-images-train', 'train-rle.csv')
-	dataset = DataLoader(dataset, batch_size=args.batch_size, shuffle = False)
+	dataset = DataLoader(dataset, batch_size=args.batch_size, shuffle = True)
 	
+	#model.load_state_dict(torch.load('./model_100.pth'))
+	
+	loss = smp.utils.losses.BCEDiceLoss(eps=1.)
+	
+
 	optimizer = optim.Adam([
 		{'params': model.decoder.parameters(), 'lr': args.lr},
 		{'params': model.encoder.parameters(), 'lr': args.lr},])
 
+	
 	print(f"""
 		Current Hyper-Parameters:
 		o Model Type: {args.model},
@@ -78,41 +81,67 @@ if __name__ == '__main__':
 		o Learning Rate : {args.lr},
 		""")
 
-	for ep in tqdm(range(args.epoch)):
-		avg_bce_loss = 0
-		avg_iou = 0
-		for index, batch in enumerate(dataset):
-		
-			x, y = batch
-			x = x.to(device)
-			y = y.to(device)
-			
-			output = model(x)
-			# print(output)
-			bce_loss = loss_fn(output, y)
+	metrics = [ smp.utils.metrics.IoUMetric(eps=1.), smp.utils.metrics.FscoreMetric(eps=1.),]
 
-			iou = IOU(output, y)
-			try:
-				avg_iou += iou.item()
-			except:
-				pass
-			loss = bce_loss
-			
-			avg_bce_loss += bce_loss.item()
-			optimizer.zero_grad()
-			loss.backward()
-			optimizer.step()
-			#test = output[0][0].cpu().detach()
+	train_epoch = smp.utils.train.TrainEpoch(
+		model, 
+		loss=loss, 
+		metrics=metrics,
+		optimizer=optimizer,
+		device=device,
+		verbose=True,
+	)
 
-		print('Avg BCE Loss : [%.4f], Avg IOU : [%.4f]' % (avg_bce_loss/len(dataset), (avg_iou/len(dataset))))		
+	max_score = 0
+	for i in range(0, 40):
+		print('\nEpoch: {}'.format(i))
+
+		train_logs = train_epoch.run(dataset)
 		
-		if ep < 100:
-			torch.save(model.state_dict(), './model_100.pth')
-		elif ep < 200:
-			torch.save(model.state_dict(), './model_200.pth')
-		elif ep < 300:
-			torch.save(model.state_dict(), './model_300.pth')
-		elif ep < 400:
-			torch.save(model.state_dict(), './model_400.pth')
-		else:
-			torch.save(model.state_dict(), './model_500.pth')
+		# do something (save model, change lr, etc.)
+		if max_score < train_logs['iou']:
+			max_score = train_logs['iou']
+			torch.save(model, './best_model.pth')
+			print('Model saved!')
+			
+		if i == 25:
+			optimizer.param_groups[0]['lr'] = 1e-5
+			print('Decrease decoder learning rate to 1e-5!')
+	# for ep in tqdm(range(args.epoch)):
+	#   avg_bce_loss = 0
+	#   avg_iou = 0
+	#   for index, batch in enumerate(dataset):
+		
+	#       x, y = batch
+	#       x = x.to(device)
+	#       y = y.to(device)
+			
+	#       output = model(x)
+	#       # print(output)
+	#       bce_loss = loss_fn(output, y)
+
+	#       iou = IOU(output, y)
+	#       try:
+	#           avg_iou += iou.item()
+	#       except:
+	#           pass
+	#       loss = bce_loss
+			
+	#       avg_bce_loss += bce_loss.item()
+	#       optimizer.zero_grad()
+	#       loss.backward()
+	#       optimizer.step()
+	#       #test = output[0][0].cpu().detach()
+
+	#   print('Avg BCE Loss : [%.4f], Avg IOU : [%.4f]' % (avg_bce_loss/len(dataset), (avg_iou/len(dataset))))      
+		
+	#   if ep < 100:
+	#       torch.save(model.state_dict(), './model_100.pth')
+	#   elif ep < 200:
+	#       torch.save(model.state_dict(), './model_200.pth')
+	#   elif ep < 300:
+	#       torch.save(model.state_dict(), './model_300.pth')
+	#   elif ep < 400:
+	#       torch.save(model.state_dict(), './model_400.pth')
+	#   else:
+	#       torch.save(model.state_dict(), './model_500.pth')
