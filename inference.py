@@ -1,7 +1,7 @@
 import numpy as np
 import torch.nn as nn
 import torch
-from model import Unet
+from model import U_resnet, Bottleneck, UnetBlock
 from os.path import join
 import os 
 from os import listdir
@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 from mask_functions import read_dicom, mask2rle, rle2mask
 import pandas as pd
+import segmentation_models_pytorch as smp
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device('cuda' if cuda else 'cpu')
@@ -19,19 +20,19 @@ device = torch.device('cuda' if cuda else 'cpu')
 parser = ArgumentParser()
 parser.add_argument("-img", "--img", dest="img_index", type=int, default=100)
 args = parser.parse_args()
+mean=(0.485, 0.456, 0.406)
+std=(0.229, 0.224, 0.225)
 
-std = [0.5]
-mean = [0.5]
 transform = transforms.Compose([
 	# transforms.Grayscale(),
 	transforms.ToPILImage(),
-	transforms.Resize((512,512)),
+	transforms.Resize((256,256)),
 	transforms.ToTensor(),
 	transforms.Normalize(mean, std)
 	])
 label_transform = transforms.Compose([
 	transforms.ToPILImage(),
-	transforms.Resize((512, 512)),
+	transforms.Resize((256, 256)),
 	transforms.ToTensor()
 	])
 def IOU(pred, label):
@@ -51,17 +52,20 @@ def IOU(pred, label):
 	return total_score / valid_count
 	
 def xchest(image_path, image_name):
-	model = Unet().to(device)
+	model = smp.Unet("resnet18", encoder_weights="imagenet").to(device)
 	model.load_state_dict(torch.load('./model_100.pth'))
 	model.eval()
-
-	image, w, h = read_dicom(image_path)
-	image = transform(image).to(device)
-	image = image.view(1, 1, 512, 512)
-	res = model(image.float())[0].cpu().detach().numpy()[0]
-
-	res =( res>=0.4)*1
 	
+	image, w, h = read_dicom(image_path)
+	# plt.imshow(image)
+	# plt.show()
+	
+	image = transform(image).to(device)
+	image = image.view(1, 3, 256, 256)
+	res = model.predict(image)
+	# res = model(image.float())[0].cpu().detach().numpy()[0]
+	# res = ( res>=0.5)*1
+	print(torch.max(res))
 
 	csv_data = pd.read_csv('./train-rle.csv')
 	table = {}
@@ -75,17 +79,19 @@ def xchest(image_path, image_name):
 	mask_image = rle2mask(mask_rle, w, h)
 	mask_image = label_transform(mask_image)[0]
 	
-	print(IOU([res], [mask_image.t()]))
+	print(IOU([res.cpu().detach().numpy()[0]], [mask_image.t()]))
 	plt.figure(1)
 	plt.subplot(211)
 	plt.title('res')
-	plt.imshow(image.cpu().detach().numpy().reshape(512,512))
+	print(image.size())
+
+	plt.imshow(np.transpose(image.cpu().detach().numpy()[0], (1,2,0)))
 	plt.imshow((mask_image*255).numpy().T, alpha=0.5, cmap='gray')
 	plt.subplot(212)
-	plt.imshow(res*255, cmap='gray')
+	plt.imshow(res.cpu().detach().numpy()[0].reshape(256,256), cmap='gray')
 	plt.show()
 
-for i in range(1000):
+for i in range(30):
 
 	files = listdir(join(os.getcwd(), 'dicom-images-train'))[i]
 	sub_file = listdir(join(os.getcwd(), 'dicom-images-train', files))[0]

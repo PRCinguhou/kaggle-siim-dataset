@@ -11,6 +11,8 @@ def read_dicom(img_path):
     ds = pydicom.dcmread(img_path)
     data = ds.pixel_array
     h, w = data.shape
+    data = data.reshape(h,w,1)
+    data = np.repeat(data, 3, axis=2)
     return data, h, w
 
 def mask2rle(img, width, height):

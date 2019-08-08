@@ -10,19 +10,20 @@ from os import listdir
 import pandas as pd
 from mask_functions import read_dicom, mask2rle, rle2mask
 from collections import Counter
-mean = [0.5]
-std = [0.5]
+import torch.nn as nn
+mean=(0.485, 0.456, 0.406)
+std=(0.229, 0.224, 0.225)
 
 transform = transforms.Compose([
 	transforms.ToPILImage(),
-	transforms.Resize((512,512)),
+	transforms.Resize((256,256)),
 	transforms.ToTensor(),
 	transforms.Normalize(mean, std)
 	])
 
 label_transform = transforms.Compose([
 	transforms.ToPILImage(),
-	transforms.Resize((512, 512)),
+	transforms.Resize((256, 256)),
 	transforms.ToTensor()
 	])
 
@@ -57,17 +58,25 @@ class siim_dataset(Dataset):
 		image_mask = self.id2mask[image_name.replace('.dcm','')]
 
 		image, width, height = read_dicom(join(os.getcwd(), self.img_path, dir_name, sub_dir_name, image_name))
-		image = transform(image)
-
+		
 		label = rle2mask(image_mask, width, height).T
+	
+		image = transform(image)
 		label = label_transform(label)
-		label = label.view(1, 512, 512)
-		return image.float(), label
+		label = label.view(1, 256, 256)
+
+		return image, label
 
 if __name__ == '__main__':
 	dataset = siim_dataset('dicom-images-train', 'train-rle.csv')
 	dataset = DataLoader(dataset, batch_size=1)
+	fn = nn.BCELoss()
+	loss = 0
 	for index, i in enumerate(dataset):
 		x, y = i
-		if index == 100:
-			break
+		out = torch.ones(x.size())
+		out /= 2
+		c_loss = fn(out, y)
+		print(c_loss)
+		loss += c_loss.item()
+	print(loss/len(dataset))
